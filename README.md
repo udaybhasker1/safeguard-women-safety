@@ -106,4 +106,4 @@ needs real wearable recordings.
 
 ## Author
 
-Your Name - add your LinkedIn link here
+H.A. Uday Bhasker
