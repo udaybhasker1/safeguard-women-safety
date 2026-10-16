@@ -1,0 +1,12 @@
+venv
+.venv
+**/node_modules
+**/dist
+**/__pycache__
+.git
+.env
+backend/.env
+backend/data/*.db
+backend/data/contacts.json
+backend/data/alerts.json
+docs

@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+numpy
+pydantic
+PyJWT
+python-dotenv
