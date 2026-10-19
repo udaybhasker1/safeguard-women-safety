@@ -70,6 +70,24 @@ function normalizeAnalysis(a = {}) {
   };
 }
 
+const CHANNEL_LABELS = {
+  telegram: "Telegram",
+  sms: "SMS",
+  whatsapp: "WhatsApp",
+};
+
+function formatChannels(result) {
+  const channels = result.channels || {
+    sms: result.sms,
+    whatsapp: result.whatsapp,
+  };
+
+  return Object.entries(channels)
+    .filter(([, status]) => status)
+    .map(([name, status]) => `${CHANNEL_LABELS[name] || name}: ${status}`)
+    .join(" · ");
+}
+
 function SafeGuardApp({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState("home");
 
@@ -456,6 +474,58 @@ function SafeGuardApp({ user, onLogout }) {
       setTimeout(fetchAlerts, 6000);
     } catch (error) {
       showToast("Cannot reach the server.");
+    }
+  }
+
+  async function syncTelegram() {
+    try {
+      const response = await apiFetch(`/contacts/sync-telegram`, {
+        method: "POST",
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        showToast(
+          typeof data.detail === "string"
+            ? data.detail
+            : "Could not check Telegram."
+        );
+        return;
+      }
+
+      await fetchContacts();
+
+      showToast(
+        data.linked > 0
+          ? `${data.linked} contact(s) linked on Telegram.`
+          : "No new Telegram links yet."
+      );
+    } catch (error) {
+      showToast("Cannot reach the server.");
+    }
+  }
+
+  async function copyInviteLink(link) {
+    try {
+      await navigator.clipboard.writeText(link);
+      showToast("Invite link copied.");
+    } catch (error) {
+      window.prompt("Copy this invite link:", link);
+    }
+  }
+
+  async function shareInviteLink(contact) {
+    const text = `${user.name} added you as an emergency contact on SafeGuard. Open this link and press Start to receive safety alerts:`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ text, url: contact.invite_link });
+      } catch (error) {
+        // user closed the share sheet
+      }
+    } else {
+      copyInviteLink(contact.invite_link);
     }
   }
 
@@ -1208,8 +1278,7 @@ function SafeGuardApp({ user, onLogout }) {
                     key={index}
                     style={{ fontSize: 12, margin: "4px 0 0" }}
                   >
-                    {result.name} ({result.phone}) — SMS: {result.sms} ·
-                    WhatsApp: {result.whatsapp}
+                    {result.name} — {formatChannels(result)}
                   </p>
                 ))}
               </div>
@@ -1405,6 +1474,29 @@ function SafeGuardApp({ user, onLogout }) {
                 <p>
                   {contact.relation || "Contact"} · {contact.phone}
                 </p>
+
+                <p>
+                  Telegram:{" "}
+                  {contact.telegram_linked
+                    ? "linked ✓"
+                    : contact.invite_link
+                    ? "not linked yet"
+                    : "bot not set up on the server"}
+                </p>
+
+                {!contact.telegram_linked && contact.invite_link && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => copyInviteLink(contact.invite_link)}
+                    >
+                      Copy invite link
+                    </button>
+
+                    <button onClick={() => shareInviteLink(contact)}>
+                      Share
+                    </button>
+                  </div>
+                )}
               </div>
 
               <button onClick={() => removeContact(contact.id)}>
@@ -1451,6 +1543,10 @@ function SafeGuardApp({ user, onLogout }) {
 
           <button onClick={addContact}>Save contact</button>
 
+          <button onClick={syncTelegram} style={{ marginLeft: 8 }}>
+            Refresh Telegram status
+          </button>
+
           {contacts.length > 0 && (
             <button
               onClick={sendTestAlert}
@@ -1468,8 +1564,7 @@ function SafeGuardApp({ user, onLogout }) {
 
           <div>
             <p>
-              With a Twilio trial account, messages only reach phone
-              numbers verified in the Twilio console.
+              Alerts are sent to each contact on Telegram. Save the contact, send them their invite link, and ask them to open it and press Start. Then tap Refresh Telegram status.
             </p>
           </div>
 

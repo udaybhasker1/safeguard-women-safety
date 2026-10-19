@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     relation TEXT NOT NULL DEFAULT '',
+    link_token TEXT,
+    telegram_chat_id TEXT,
     UNIQUE (user_id, phone)
 );
 
@@ -63,3 +65,12 @@ def db():
 def init_db():
     with db() as conn:
         conn.executescript(SCHEMA)
+
+        # databases created before Telegram support get the new columns
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(contacts)")}
+
+        if "link_token" not in columns:
+            conn.execute("ALTER TABLE contacts ADD COLUMN link_token TEXT")
+
+        if "telegram_chat_id" not in columns:
+            conn.execute("ALTER TABLE contacts ADD COLUMN telegram_chat_id TEXT")

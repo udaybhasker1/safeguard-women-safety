@@ -1,7 +1,7 @@
 try:  # loads backend/.env if python-dotenv is installed
-    from dotenv import load_dotenv
+    from importlib import import_module
 
-    load_dotenv()
+    import_module("dotenv").load_dotenv()
 except ImportError:
     pass
 
@@ -24,7 +24,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # type: i
 from fastapi.staticfiles import StaticFiles  # type: ignore
 from pydantic import BaseModel, Field  # type: ignore
 
-from services import alert_service, auth_service, contact_service
+from services import alert_service, auth_service, contact_service, telegram_service
 from services.db import init_db
 from services.safety_manager import SafetyManager
 from services.sensor_simulator import (
@@ -300,19 +300,53 @@ def alerts(user: dict = Depends(current_user)):
 # EMERGENCY CONTACTS
 # ------------------------------------------------
 
+def public_contact(contact):
+    """What the browser may see (never the token or the chat id)."""
+    return {
+        "id": contact["id"],
+        "name": contact["name"],
+        "phone": contact["phone"],
+        "relation": contact["relation"],
+        "telegram_linked": bool(contact.get("telegram_chat_id")),
+        "invite_link": telegram_service.invite_link(contact.get("link_token")),
+    }
+
+
 @router.get("/contacts")
 def get_contacts(user: dict = Depends(current_user)):
-    return contact_service.list_contacts(user["id"])
+    return [
+        public_contact(contact)
+        for contact in contact_service.list_contacts(user["id"])
+    ]
 
 
 @router.post("/contacts")
 def create_contact(contact: ContactIn, user: dict = Depends(current_user)):
     try:
-        return contact_service.add_contact(
+        created = contact_service.add_contact(
             user["id"], contact.name, contact.phone, contact.relation
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
+
+    return public_contact(created)
+
+
+@router.post("/contacts/sync-telegram")
+def sync_telegram(user: dict = Depends(current_user)):
+    """Checks which contacts have pressed Start in the Telegram bot."""
+    if not telegram_service.is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="The Telegram bot is not configured on the server.",
+        )
+
+    try:
+        linked = telegram_service.sync_links()
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=f"Telegram error: {error}")
+
+    return {"linked": linked}
 
 
 @router.post("/contacts/test")
@@ -346,6 +380,7 @@ def system_status(user: dict = Depends(current_user)):
         "monitoring": True,
         "current_level": safety_manager.level_for(user["id"]),
         "contacts": len(contact_service.list_contacts(user["id"])),
+        "telegram": telegram_service.is_configured(),
     }
 
 

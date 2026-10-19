@@ -1,94 +1,52 @@
-"""Sends SMS + WhatsApp alerts to a user's emergency contacts through the
-Twilio REST API (standard library only) and logs every alert in SQLite.
+"""Sends alerts to a user's emergency contacts through the Telegram bot and
+logs every alert in SQLite.
 
-If Twilio is not configured, messages are marked "simulated" and printed,
-so the whole flow can still be demonstrated.
+If the bot is not configured, messages are marked "simulated" and printed, so
+the whole flow can still be demonstrated.
 """
-import base64
 import json
-import os
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 import uuid
 from datetime import datetime
 
+from services import telegram_service
 from services.contact_service import list_contacts
 from services.db import db
 
-TWILIO_API_BASE = os.getenv("TWILIO_API_BASE", "https://api.twilio.com")
 
+def _send_one(contact, message):
+    if not telegram_service.is_configured():
+        print(f"[SIMULATED ALERT to {contact['name']}] {message}")
+        return {"telegram": "simulated"}
 
-def _configured():
-    return bool(os.getenv("TWILIO_ACCOUNT_SID") and os.getenv("TWILIO_AUTH_TOKEN"))
+    chat_id = contact.get("telegram_chat_id")
 
-
-def _post_message(to, from_, body):
-    sid = os.environ["TWILIO_ACCOUNT_SID"]
-    token = os.environ["TWILIO_AUTH_TOKEN"]
-
-    url = f"{TWILIO_API_BASE}/2010-04-01/Accounts/{sid}/Messages.json"
-    data = urllib.parse.urlencode({"To": to, "From": from_, "Body": body}).encode()
-
-    request = urllib.request.Request(url, data=data, method="POST")
-    credentials = base64.b64encode(f"{sid}:{token}".encode()).decode()
-    request.add_header("Authorization", f"Basic {credentials}")
-    request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    if not chat_id:
+        return {"telegram": "not linked yet"}
 
     try:
-        with urllib.request.urlopen(request, timeout=15):
-            return
-    except urllib.error.HTTPError as error:
-        try:
-            detail = json.loads(error.read().decode()).get("message", "")
-        except Exception:
-            detail = ""
-        raise RuntimeError(detail or f"HTTP {error.code}")
-    except urllib.error.URLError as error:
-        raise RuntimeError(str(error.reason))
-
-
-def _attempt(to, from_, body):
-    if not from_:
-        return "failed: sender number is not configured"
-
-    try:
-        _post_message(to, from_, body)
-        return "sent"
+        telegram_service.send_message(chat_id, message)
+        return {"telegram": "sent"}
     except Exception as error:
-        return f"failed: {str(error)[:90]}"
-
-
-def _send_one(phone, message):
-    if not _configured():
-        print(f"[SIMULATED ALERT to {phone}] {message}")
-        return "simulated", "simulated"
-
-    sms = _attempt(phone, os.getenv("TWILIO_PHONE"), message)
-
-    whatsapp = _attempt(
-        f"whatsapp:{phone}",
-        os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886"),
-        message,
-    )
-
-    return sms, whatsapp
+        return {"telegram": f"failed: {str(error)[:90]}"}
 
 
 def send_emergency_alert(user_id, message, kind="Alert"):
+    # pick up contacts who pressed Start in Telegram since the last check
+    try:
+        telegram_service.sync_links()
+    except Exception as error:
+        print("Telegram sync failed:", error)
+
     contacts = list_contacts(user_id)
 
     results = []
 
     for contact in contacts:
-        sms, whatsapp = _send_one(contact["phone"], message)
-
         results.append({
             "name": contact["name"],
             "phone": contact["phone"],
-            "sms": sms,
-            "whatsapp": whatsapp,
+            "channels": _send_one(contact, message),
         })
 
     entry = {

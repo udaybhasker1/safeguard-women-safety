@@ -9,11 +9,7 @@ services:
         value: production
       - key: SECRET_KEY
         generateValue: true
-      - key: TWILIO_ACCOUNT_SID
+      - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: TWILIO_AUTH_TOKEN
+      - key: TELEGRAM_BOT_USERNAME
         sync: false
-      - key: TWILIO_PHONE
-        sync: false
-      - key: TWILIO_WHATSAPP_FROM
-        value: whatsapp:+14155238886
